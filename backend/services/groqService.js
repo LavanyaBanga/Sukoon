@@ -1,31 +1,35 @@
-const {
-  GoogleGenerativeAI,
-} = require('@google/generative-ai');
+// =====================================================
+// GROQ SERVICE
+// =====================================================
 
+let groqClient = null;
 
 // =====================================================
 // CHECK API KEY
 // =====================================================
 
-if (!process.env.GEMINI_API_KEY) {
-  console.error(
-    '❌ GEMINI_API_KEY is missing from .env'
-  );
+if (!process.env.GROQ_API_KEY) {
+  console.error('❌ GROQ_API_KEY is missing from .env');
 }
 
-
 // =====================================================
-// GEMINI SETUP
+// GROQ SETUP
 // =====================================================
 
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY
-);
+const MODEL_NAME =
+  process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 
+const getGroqClient = async () => {
+  if (!groqClient) {
+    const { default: Groq } = await import('groq-sdk');
 
-// Current Gemini model
-const MODEL_NAME = 'gemini-3.6-flash';
+    groqClient = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
+    });
+  }
 
+  return groqClient;
+};
 
 // =====================================================
 // CRISIS DETECTION
@@ -48,18 +52,13 @@ const CRISIS_KEYWORDS = [
   'overdose',
 ];
 
-
-const containsCrisisLanguage = (
-  text = ''
-) => {
+const containsCrisisLanguage = (text = '') => {
   const lower = text.toLowerCase();
 
-  return CRISIS_KEYWORDS.some(
-    (keyword) =>
-      lower.includes(keyword)
+  return CRISIS_KEYWORDS.some((keyword) =>
+    lower.includes(keyword)
   );
 };
-
 
 // =====================================================
 // CRISIS RESPONSE
@@ -76,7 +75,6 @@ If you may be in immediate danger, please move to a safer place and seek in-pers
 
 You can continue talking here, but please prioritize getting real-time human support.
 `;
-
 
 // =====================================================
 // GITA SYSTEM PROMPT
@@ -145,7 +143,6 @@ Example:
 Keep the response supportive and not excessively long.
 `;
 
-
 // =====================================================
 // COMPANION SYSTEM PROMPT
 // =====================================================
@@ -186,7 +183,6 @@ Ask at most one gentle follow-up question if it would genuinely help.
 For serious or ongoing struggles, gently encourage seeking support from a qualified mental health professional.
 `;
 
-
 // =====================================================
 // JOURNAL REFLECTION PROMPT
 // =====================================================
@@ -207,7 +203,6 @@ Your response should:
 
 Speak directly to the writer in warm, simple language.
 `;
-
 
 // =====================================================
 // THOUGHT SORTING PROMPT
@@ -246,7 +241,6 @@ Use exactly this structure:
 Keep every item under 20 words.
 `;
 
-
 // =====================================================
 // WEEKLY INSIGHT PROMPT
 // =====================================================
@@ -274,43 +268,30 @@ Be encouraging, warm and specific.
 Do not exaggerate conclusions if there is little data.
 `;
 
-
 // =====================================================
-// MAIN GEMINI CALL
+// MAIN GROQ CALL
 // =====================================================
 
-async function callGemini(
+async function callGroq(
   systemPrompt,
   userContent,
-  history = []
+  history = [],
+  options = {}
 ) {
   try {
-
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.GROQ_API_KEY) {
       throw new Error(
-        'GEMINI_API_KEY is not configured'
+        'GROQ_API_KEY is not configured'
       );
     }
 
-
     console.log(
-      `🤖 Calling Gemini model: ${MODEL_NAME}`
+      `🤖 Calling Groq model: ${MODEL_NAME}`
     );
 
+    const groq = await getGroqClient();
 
-    const model =
-      genAI.getGenerativeModel({
-        model: MODEL_NAME,
-
-        systemInstruction:
-          systemPrompt,
-      });
-
-
-    // Convert MongoDB conversation history
-    // assistant -> model
-    // user -> user
-
+    // MongoDB conversation history
     const chatHistory = history
       .filter(
         (message) =>
@@ -319,56 +300,59 @@ async function callGemini(
       )
       .map((message) => ({
         role:
-          message.role ===
-          'assistant'
-            ? 'model'
+          message.role === 'assistant'
+            ? 'assistant'
             : 'user',
-
-        parts: [
-          {
-            text: message.content,
-          },
-        ],
+        content: message.content,
       }));
 
+    const messages = [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
 
-    const chat = model.startChat({
-      history: chatHistory,
-    });
+      ...chatHistory,
 
+      {
+        role: 'user',
+        content: userContent,
+      },
+    ];
 
-    const result =
-      await chat.sendMessage(
-        userContent
-      );
+    const request = {
+      model: MODEL_NAME,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_completion_tokens:
+        options.maxTokens ?? 1000,
+    };
 
+    // Used for thought sorting
+    if (options.json) {
+      request.response_format = {
+        type: 'json_object',
+      };
+    }
 
-    const response =
-      result.response;
-
+    const completion =
+      await groq.chat.completions.create(request);
 
     const text =
-      response.text();
-
+      completion.choices?.[0]?.message?.content;
 
     if (!text || !text.trim()) {
       throw new Error(
-        'Gemini returned an empty response'
+        'Groq returned an empty response'
       );
     }
 
-
-    console.log(
-      '✅ Gemini response received'
-    );
-
+    console.log('✅ Groq response received');
 
     return text.trim();
-
   } catch (error) {
-
     console.error(
-      '\n================ GEMINI ERROR ================'
+      '\n================ GROQ ERROR ================'
     );
 
     console.error(
@@ -383,9 +367,7 @@ async function callGemini(
         'Unknown'
     );
 
-    if (
-      error.response?.data
-    ) {
+    if (error.response?.data) {
       console.error(
         'Response:',
         error.response.data
@@ -393,53 +375,40 @@ async function callGemini(
     }
 
     console.error(
-      'Full error:',
-      error
+      '============================================\n'
     );
-
-    console.error(
-      '==============================================\n'
-    );
-
 
     throw error;
   }
 }
 
-
 // =====================================================
 // ASK KRISHNA
 // =====================================================
 
-const getGitaWisdom = async (
-  userMessage
-) => {
-
-  if (
-    containsCrisisLanguage(
-      userMessage
-    )
-  ) {
+const getGitaWisdom = async (userMessage) => {
+  if (containsCrisisLanguage(userMessage)) {
     return {
       text: CRISIS_RESPONSE,
       crisis: true,
     };
   }
 
-
-  const text =
-    await callGemini(
-      GITA_SYSTEM_PROMPT,
-      userMessage
-    );
-
+  const text = await callGroq(
+    GITA_SYSTEM_PROMPT,
+    userMessage,
+    [],
+    {
+      temperature: 0.65,
+      maxTokens: 900,
+    }
+  );
 
   return {
     text,
     crisis: false,
   };
 };
-
 
 // =====================================================
 // TALK TO SUKOON
@@ -449,26 +418,22 @@ const getCompanionReply = async (
   userMessage,
   history = []
 ) => {
-
-  if (
-    containsCrisisLanguage(
-      userMessage
-    )
-  ) {
+  if (containsCrisisLanguage(userMessage)) {
     return {
       text: CRISIS_RESPONSE,
       crisis: true,
     };
   }
 
-
-  const text =
-    await callGemini(
-      COMPANION_SYSTEM_PROMPT,
-      userMessage,
-      history
-    );
-
+  const text = await callGroq(
+    COMPANION_SYSTEM_PROMPT,
+    userMessage,
+    history,
+    {
+      temperature: 0.75,
+      maxTokens: 700,
+    }
+  );
 
   return {
     text,
@@ -476,68 +441,57 @@ const getCompanionReply = async (
   };
 };
 
-
 // =====================================================
 // JOURNAL REFLECTION
 // =====================================================
 
-const getJournalReflection =
-  async (journalContent) => {
-
-    const text =
-      await callGemini(
-        REFLECTION_SYSTEM_PROMPT,
-        journalContent
-      );
-
-    return text;
-  };
-
+const getJournalReflection = async (
+  journalContent
+) => {
+  return await callGroq(
+    REFLECTION_SYSTEM_PROMPT,
+    journalContent,
+    [],
+    {
+      temperature: 0.7,
+      maxTokens: 400,
+    }
+  );
+};
 
 // =====================================================
 // SORT THOUGHTS
 // =====================================================
 
-const sortThoughts = async (
-  brainDump
-) => {
-
-  const raw =
-    await callGemini(
-      SORTING_SYSTEM_PROMPT,
-      brainDump
-    );
-
-
-  // Sometimes AI can still add markdown fences,
-  // so remove them before JSON.parse()
+const sortThoughts = async (brainDump) => {
+  const raw = await callGroq(
+    SORTING_SYSTEM_PROMPT,
+    brainDump,
+    [],
+    {
+      temperature: 0.3,
+      maxTokens: 700,
+      json: true,
+    }
+  );
 
   const cleaned = raw
     .replace(/```json/gi, '')
     .replace(/```/g, '')
     .trim();
 
-
   try {
-
-    return JSON.parse(
-      cleaned
-    );
-
+    return JSON.parse(cleaned);
   } catch (error) {
-
     console.error(
-      '❌ Gemini JSON parse error:',
+      '❌ Groq JSON parse error:',
       error.message
     );
 
     console.log(
-      'Raw Gemini response:',
+      'Raw Groq response:',
       cleaned
     );
-
-
-    // safe fallback
 
     return {
       canControl: [],
@@ -551,7 +505,6 @@ const sortThoughts = async (
   }
 };
 
-
 // =====================================================
 // WEEKLY INSIGHT
 // =====================================================
@@ -559,16 +512,16 @@ const sortThoughts = async (
 const getWeeklyInsight = async (
   summaryText
 ) => {
-
-  const text =
-    await callGemini(
-      WEEKLY_INSIGHT_SYSTEM_PROMPT,
-      summaryText
-    );
-
-  return text;
+  return await callGroq(
+    WEEKLY_INSIGHT_SYSTEM_PROMPT,
+    summaryText,
+    [],
+    {
+      temperature: 0.65,
+      maxTokens: 450,
+    }
+  );
 };
-
 
 // =====================================================
 // EXPORTS
