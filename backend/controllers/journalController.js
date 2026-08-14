@@ -1,6 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const Journal = require('../models/Journal');
-const { getJournalReflection } = require('../services/geminiService');
+const { getJournalReflection } = require('../services/groqService');
 
 // @desc Create journal entry
 // @route POST /api/journals
