@@ -11,32 +11,24 @@ const app = express();
 
 const allowedOrigins = [
   'http://localhost:5173',
+  'https://sukoon-9m23.onrender.com',
   'https://sukoon-yzrc.onrender.com',
 ];
 
-/* TEMP DEBUG */
-app.use((req, res, next) => {
-  console.log(
-    `[REQ] ${req.method} ${req.originalUrl} | Origin: ${req.headers.origin || 'none'}`
-  );
-  next();
-});
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS BLOCKED:', origin);
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
-
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-app.use(cors(corsOptions));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.log('❌ CORS BLOCKED:', origin);
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
