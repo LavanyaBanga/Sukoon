@@ -14,17 +14,33 @@ const allowedOrigins = [
   'https://sukoon-yzrc.onrender.com',
 ];
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  })
-);
+/* TEMP DEBUG */
+app.use((req, res, next) => {
+  console.log(
+    `[REQ] ${req.method} ${req.originalUrl} | Origin: ${req.headers.origin || 'none'}`
+  );
+  next();
+});
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS BLOCKED:', origin);
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
+
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -39,7 +55,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/moods', require('./routes/moodRoutes'));
 app.use('/api/journals', require('./routes/journalRoutes'));
@@ -48,7 +63,6 @@ app.use('/api/ai', require('./routes/aiRoutes'));
 app.use('/api/mindfulness', require('./routes/mindfulnessRoutes'));
 app.use('/api/selfcare', require('./routes/selfCareRoutes'));
 
-// Error handlers
 app.use(notFound);
 app.use(errorHandler);
 
